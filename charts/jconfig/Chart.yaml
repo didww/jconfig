@@ -17,3 +17,5 @@ keywords:
   - prometheus
 maintainers:
   - name: DIDWW
+annotations:
+  licenses: GPL-3.0-or-later

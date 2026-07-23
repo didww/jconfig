@@ -26,7 +26,7 @@ FROM gcr.io/distroless/static-debian13:nonroot
 LABEL org.opencontainers.image.title="jconfig" \
       org.opencontainers.image.description="Junos configuration backup into git with a Prometheus exporter" \
       org.opencontainers.image.source="https://github.com/didww/jconfig" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="GPL-3.0-or-later"
 
 COPY --from=build /out/jconfig /usr/local/bin/jconfig
 
