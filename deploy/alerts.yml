@@ -1,0 +1,118 @@
+# Prometheus alerting rules for jconfig.
+groups:
+  - name: jconfig
+    rules:
+      # --- backup problems ---
+
+      - alert: JconfigBackupFailing
+        expr: jconfig_backup_success == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Config backup failing for {{ $labels.device }}"
+          description: >-
+            The last backup of {{ $labels.device }} failed. Failing stage:
+            {{ with printf "jconfig_backup_last_error{device='%s'}" $labels.device | query }}
+            {{ range . }}{{ .Labels.stage }}{{ end }}{{ end }}.
+
+      - alert: JconfigBackupStale
+        # No successful backup in three intervals. Devices that have never
+        # succeeded are caught by JconfigBackupNeverSucceeded instead.
+        expr: |
+          time() - jconfig_backup_last_success_timestamp_seconds > 3 * 3600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No fresh config backup for {{ $labels.device }}"
+          description: "Last successful backup was {{ $value | humanizeDuration }} ago."
+
+      - alert: JconfigBackupNeverSucceeded
+        expr: |
+          jconfig_backup_last_attempt_timestamp_seconds
+            unless jconfig_backup_last_success_timestamp_seconds
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.device }} has never been backed up successfully"
+
+      - alert: JconfigAuthFailure
+        # Credential and host key problems will not fix themselves.
+        expr: jconfig_backup_last_error{stage=~"auth|connect"} == 1
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cannot reach {{ $labels.device }} ({{ $labels.stage }})"
+
+      - alert: JconfigManyDevicesFailing
+        expr: jconfig_devices_failing / jconfig_devices_enabled > 0.25
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of devices are failing backup"
+          description: "A shared cause is likely: credentials, DNS, or a firewall change."
+
+      # --- git problems ---
+
+      - alert: JconfigGitCommitFailing
+        expr: increase(jconfig_git_operations_total{operation="commit",result="failure"}[1h]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "jconfig cannot commit to the repository"
+          description: "Configs are being fetched but not stored. Check disk space and permissions."
+
+      - alert: JconfigGitPushFailing
+        expr: jconfig_git_push_enabled == 1 and jconfig_git_push_success == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "jconfig cannot push to the git remote"
+
+      - alert: JconfigGitUnpushedCommits
+        expr: jconfig_git_unpushed_commits > 10
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} commits have not reached the git remote"
+
+      - alert: JconfigRepoDirty
+        # Set when a run was interrupted between writing files and committing.
+        expr: jconfig_git_repo_dirty == 1
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "jconfig repository has uncommitted changes"
+
+      # --- the exporter itself ---
+
+      - alert: JconfigDown
+        expr: up{job="jconfig"} == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "jconfig is not being scraped"
+
+      - alert: JconfigConfigReloadFailed
+        expr: jconfig_config_load_success == 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "jconfig rejected its configuration on reload"
+          description: "The previous configuration is still in effect."
+
+      - alert: JconfigNoRuns
+        expr: time() - jconfig_run_last_timestamp_seconds > 6 * 3600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "jconfig has not completed a backup run in 6 hours"

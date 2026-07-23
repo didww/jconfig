@@ -1,0 +1,115 @@
+# jconfig - Junos configuration backup into git
+#
+# Every ${VAR} and ${VAR:-default} is expanded from the environment when this
+# file is read, so secrets never have to live on disk. Write $${VAR} for a
+# literal ${VAR}.
+
+# Metrics socket: serves /metrics, /healthz and /ready, and nothing else. Safe
+# to expose to a Prometheus server.
+listen: "0.0.0.0:9639"
+metrics_path: /metrics
+
+# Management socket: serves the device list and the endpoints that trigger
+# backups. It is unauthenticated, so keep it on loopback.
+#   "127.0.0.1:9640"  loopback only (default)
+#   ""                control surface disabled entirely
+management_listen: "127.0.0.1:9640"
+log_level: info      # debug, info, warn, error
+log_format: text     # text or json
+
+scheduler:
+  # Default backup interval; individual devices may override it.
+  interval: 1h
+  # Devices backed up in parallel.
+  concurrency: 8
+  # Spread the first run of each device over this window so a large fleet is
+  # not hit all at once on startup.
+  jitter: 5m
+  # Back up everything shortly after startup rather than waiting a full
+  # interval.
+  run_on_start: true
+  # How often the scheduler looks for devices that are due.
+  scan_interval: 15s
+  # Delay before retrying a device that failed. Defaults to its interval.
+  retry_interval: 10m
+
+repo:
+  # Working directory of the git repository. Created and initialised if it
+  # does not exist yet.
+  path: /var/lib/jconfig/configs
+  branch: main
+  # flat  -> mx1.conf, mx1.set
+  # group -> core/mx1.conf, edge/mx2.conf
+  layout: flat
+  author_name: jconfig
+  author_email: jconfig@example.net
+  # Prepended to every commit subject, e.g. "[jconfig] mx1: configuration changed".
+  commit_prefix: ""
+
+  # When path is empty and push.url is set, clone the remote instead of
+  # starting an empty repository. This is what lets a container come up on a
+  # blank volume and continue the existing history rather than creating a new
+  # one whose first push would be rejected. An empty remote falls back to a
+  # fresh repository; an unreachable one is a startup error.
+  clone_on_init: true
+
+  # Optional mirror to a remote. Push failures are visible in
+  # jconfig_git_push_success and jconfig_git_unpushed_commits.
+  push:
+    enabled: false
+    remote: origin
+    url: git@git.example.net:noc/junos-configs.git
+    branch: main
+    # SSH remotes require a key: either key_file or an inline key.
+    key_file: /var/lib/jconfig/.ssh/id_ed25519
+    # key: "${JCONFIG_GIT_SSH_KEY}"
+    key_passphrase: ""
+    known_hosts: /var/lib/jconfig/.ssh/known_hosts
+    insecure_ignore_host_key: false
+    # HTTPS remotes: username plus a token in password.
+    username: ""
+    password: "${JCONFIG_GIT_TOKEN}"
+    timeout: 2m
+    force: false
+
+# Applied to every device that does not set the field itself.
+defaults:
+  transport: ssh          # ssh (CLI over exec) or netconf
+  username: backup
+  password: "${JCONFIG_DEVICE_PASSWORD}"
+  # key_file: /var/lib/jconfig/.ssh/id_ed25519
+  # An inline key, as an alternative to key_file. Accepts a literal PEM block
+  # or base64-encoded PEM. Prefer base64 when the value comes from ${VAR}:
+  # a raw PEM's newlines would be substituted into this document and break it.
+  # key: "${JCONFIG_SSH_KEY}"
+  # key_passphrase: "${JCONFIG_SSH_KEY_PASSPHRASE}"
+  known_hosts: /var/lib/jconfig/.ssh/known_hosts
+  insecure_ignore_host_key: false
+  formats: [text, set]    # text -> .conf, set -> .set, xml -> .xml
+  timeout: 2m
+  # Drop lines that change on every fetch and would otherwise produce empty
+  # commits. The "Last commit" banner only moves when the device is actually
+  # committed to, so keeping it is usually what you want.
+  remove_lines:
+    - '^## Last changed:'
+  # Legacy gear that will not negotiate modern algorithms:
+  # kex_algorithms: [diffie-hellman-group14-sha1]
+  # ciphers: [aes128-ctr]
+  # host_key_algorithms: [ssh-rsa]
+
+devices:
+  - name: mx1.ams
+    host: 10.0.0.1
+    group: core
+
+  - name: mx2.ams
+    host: 10.0.0.2
+    group: core
+    transport: netconf     # port defaults to 830 for netconf
+    interval: 30m
+
+  - name: ex1.ams
+    host: 10.0.1.1
+    group: access
+    formats: [set]
+    enabled: true

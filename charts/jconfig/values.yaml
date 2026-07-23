@@ -1,0 +1,187 @@
+# Default values for jconfig.
+
+image:
+  repository: ghcr.io/didww/jconfig
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# Runs as the nonroot user baked into the distroless image.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+terminationGracePeriodSeconds: 30
+
+# Metrics, liveness and readiness. This is the only port in the Service.
+metricsPort: 9639
+
+# Control surface. Bound to loopback, so it is never reachable from outside
+# the pod; use `kubectl port-forward` to talk to it. Set enabled: false to
+# switch it off entirely.
+management:
+  enabled: true
+  port: 9640
+
+service:
+  type: ClusterIP
+  port: 9639
+  annotations: {}
+  labels: {}
+
+# Working copy of the git repository. jconfig clones repo.push.url on startup
+# when the volume is empty, so an emptyDir is enough and a restarted pod simply
+# clones again. Enable persistence only to avoid re-cloning a large history.
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes: ["ReadWriteOnce"]
+  size: 1Gi
+  annotations: {}
+
+probes:
+  liveness:
+    periodSeconds: 20
+    failureThreshold: 3
+  readiness:
+    periodSeconds: 20
+    failureThreshold: 3
+  # A first clone of a long history can be slow, so the startup probe gets a
+  # generous budget before liveness takes over.
+  startup:
+    periodSeconds: 5
+    failureThreshold: 60
+
+# prometheus-operator integration. Both are off by default so the chart works
+# on a cluster without the CRDs installed.
+serviceMonitor:
+  enabled: false
+  interval: 60s
+  scrapeTimeout: ""
+  labels: {}
+  relabelings: []
+  metricRelabelings: []
+
+prometheusRule:
+  enabled: false
+  labels: {}
+  # Replace to ship your own rules; the defaults live in templates/prometheusrule.yaml.
+  rules: []
+
+# Secrets referenced from the configuration as ${VAR}. Prefer existingSecret in
+# production so values never sit in a values file.
+secret:
+  create: true
+  # Rendered into a Secret and injected with envFrom.
+  data:
+    JCONFIG_DEVICE_PASSWORD: "change-me"
+existingSecret: ""
+
+# Extra environment for the container.
+env: []
+envFrom: []
+
+# Private key for logging in to the devices, as a literal PEM block. It is
+# stored in the Secret (never in the ConfigMap) and reaches the daemon
+# base64-encoded through $JCONFIG_SSH_KEY, so set config.defaults.key to
+# "${JCONFIG_SSH_KEY}" to use it. Leave empty to authenticate with a password.
+sshPrivateKey: ""
+
+# Private key for pushing to the git remote, same handling, exposed as
+# $JCONFIG_GIT_SSH_KEY. Only needed for ssh:// or git@ remotes.
+gitPrivateKey: ""
+
+# Contents of a known_hosts file for the devices. Mounted at
+# /etc/jconfig/ssh/known_hosts, which is where the default config points.
+# Collect with: ssh-keyscan -H mx1.ams mx2.ams
+knownHosts: ""
+# Use a Secret you already manage instead.
+existingKnownHostsSecret: ""
+
+# Supply a complete jconfig.yml through your own ConfigMap and ignore the
+# `config` block below. The key must be jconfig.yml.
+existingConfigMap: ""
+
+# jconfig.yml. listen, management_listen and metrics_path are derived from the
+# values above; everything here is passed through to the daemon verbatim, so it
+# accepts exactly the keys the daemon documents.
+config:
+  logLevel: info
+  logFormat: json
+
+  scheduler:
+    interval: 1h
+    concurrency: 8
+    jitter: 5m
+    retry_interval: 10m
+
+  repo:
+    path: /var/lib/jconfig/configs
+    branch: main
+    layout: group
+    author_name: jconfig
+    author_email: jconfig@example.net
+    # Populate an empty volume by cloning the remote, so a restarted pod
+    # continues the existing history instead of forking it.
+    clone_on_init: true
+    push:
+      enabled: true
+      remote: origin
+      url: ""
+      branch: main
+      username: ""
+      password: "${JCONFIG_GIT_TOKEN}"
+      timeout: 5m
+
+  defaults:
+    username: backup
+    password: "${JCONFIG_DEVICE_PASSWORD}"
+    known_hosts: /etc/jconfig/ssh/known_hosts
+    formats: [text, set]
+    timeout: 2m
+
+  devices: []
+  # - name: mx1.ams
+  #   host: 10.0.0.1
+  #   group: core
+  # - name: mx2.ams
+  #   host: 10.0.0.2
+  #   group: core
+  #   transport: netconf
+
+extraVolumes: []
+extraVolumeMounts: []

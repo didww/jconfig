@@ -1,0 +1,27 @@
+jconfig {{ .Chart.AppVersion }} is installed as {{ include "jconfig.fullname" . }}.
+
+Metrics:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "jconfig.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl localhost:{{ .Values.service.port }}/metrics
+
+Status and probes:
+  curl localhost:{{ .Values.service.port }}/ready
+{{ if .Values.management.enabled }}
+The control surface listens on loopback inside the pod and is not in the
+Service. Reach it with:
+  kubectl --namespace {{ .Release.Namespace }} port-forward deploy/{{ include "jconfig.fullname" . }} {{ .Values.management.port }}:{{ .Values.management.port }}
+  curl localhost:{{ .Values.management.port }}/devices
+  curl -XPOST localhost:{{ .Values.management.port }}/backup
+{{- else }}
+The control surface is disabled (management.enabled=false).
+{{- end }}
+{{ if not .Values.config.devices }}
+WARNING: no devices are configured. Set config.devices in your values.
+{{- end }}
+{{- if not .Values.config.repo.push.url }}
+WARNING: config.repo.push.url is empty, so nothing is mirrored off the pod.
+With the default emptyDir volume the history is lost when the pod restarts.
+{{- end }}
+{{- if and .Values.secret.create (eq (default "" (get .Values.secret.data "JCONFIG_DEVICE_PASSWORD")) "change-me") }}
+WARNING: secret.data.JCONFIG_DEVICE_PASSWORD is still "change-me".
+{{- end }}

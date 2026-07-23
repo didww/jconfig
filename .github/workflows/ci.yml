@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+      - name: test
+        run: go test -race -count=1 ./...
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - run: helm lint charts/jconfig
+      - name: render with defaults
+        run: helm template jconfig charts/jconfig > /dev/null
+
+      # The daemon parses its configuration strictly, so a key the chart
+      # renders but the daemon does not know is a build failure, not a
+      # surprise at rollout time.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: chart config is accepted by the daemon
+        run: |
+          go build -o /tmp/jconfig .
+          touch /tmp/known_hosts
+          helm template jconfig charts/jconfig \
+            --set config.defaults.known_hosts=/tmp/known_hosts \
+            --set config.repo.path=/tmp/repo \
+            --set config.repo.push.enabled=false \
+            --set 'config.devices[0].name=mx1' \
+            --set 'config.devices[0].host=10.0.0.1' \
+          | python3 -c "import sys,yaml; [open('/tmp/jconfig.yml','w').write(d['data']['jconfig.yml']) for d in yaml.safe_load_all(sys.stdin) if d and d['kind']=='ConfigMap']"
+          JCONFIG_DEVICE_PASSWORD=x /tmp/jconfig -config /tmp/jconfig.yml -check
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64

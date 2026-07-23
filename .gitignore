@@ -1,0 +1,14 @@
+/jconfig
+/fakejunos
+/dist/
+
+# Local configuration and secrets
+jconfig.yml
+*.env
+
+# Local tooling state
+.claude/
+
+# Local test repositories
+/configs/
+*.prom

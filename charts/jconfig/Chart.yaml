@@ -1,0 +1,19 @@
+apiVersion: v2
+name: jconfig
+description: Junos configuration backup into git, with a Prometheus exporter
+type: application
+# Overridden at package time by `make helm-package`.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/didww/jconfig
+sources:
+  - https://github.com/didww/jconfig
+keywords:
+  - junos
+  - juniper
+  - backup
+  - git
+  - networking
+  - prometheus
+maintainers:
+  - name: DIDWW

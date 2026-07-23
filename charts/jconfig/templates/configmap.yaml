@@ -1,0 +1,11 @@
+{{- if not .Values.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "jconfig.fullname" . }}
+  labels:
+    {{- include "jconfig.labels" . | nindent 4 }}
+data:
+  jconfig.yml: |
+{{ include "jconfig.config" . | indent 4 }}
+{{- end }}

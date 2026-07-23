@@ -1,0 +1,47 @@
+[Unit]
+Description=jconfig - Junos configuration backup into git
+Documentation=https://github.com/didww/jconfig
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jconfig
+Group=jconfig
+ExecStart=/usr/local/bin/jconfig -config /etc/jconfig/jconfig.yml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=15s
+
+# Secrets referenced as ${VAR} in jconfig.yml.
+# EnvironmentFile=/etc/jconfig/jconfig.env
+
+StateDirectory=jconfig
+WorkingDirectory=/var/lib/jconfig
+
+# jconfig only needs to read its config, write its repository and open
+# outbound SSH connections.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ReadWritePaths=/var/lib/jconfig
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

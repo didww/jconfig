@@ -1,0 +1,115 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "jconfig.fullname" . }}
+  labels:
+    {{- include "jconfig.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: jconfig
+      rules:
+        {{- if .Values.prometheusRule.rules }}
+        {{- toYaml .Values.prometheusRule.rules | nindent 8 }}
+        {{- else }}
+        # --- backup problems ---
+        - alert: JconfigBackupFailing
+          expr: jconfig_backup_success == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Config backup failing for {{ "{{ $labels.device }}" }}"
+
+        - alert: JconfigBackupStale
+          expr: time() - jconfig_backup_last_success_timestamp_seconds > 3 * 3600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No fresh config backup for {{ "{{ $labels.device }}" }}"
+            description: "Last successful backup was {{ "{{ $value | humanizeDuration }}" }} ago."
+
+        - alert: JconfigBackupNeverSucceeded
+          expr: |
+            jconfig_backup_last_attempt_timestamp_seconds
+              unless jconfig_backup_last_success_timestamp_seconds
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ "{{ $labels.device }}" }} has never been backed up successfully"
+
+        - alert: JconfigAuthFailure
+          expr: jconfig_backup_last_error{stage=~"auth|connect"} == 1
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cannot reach {{ "{{ $labels.device }}" }} ({{ "{{ $labels.stage }}" }})"
+
+        - alert: JconfigManyDevicesFailing
+          expr: jconfig_devices_failing / jconfig_devices_enabled > 0.25
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ "{{ $value | humanizePercentage }}" }} of devices are failing backup"
+            description: "A shared cause is likely: credentials, DNS, or a firewall change."
+
+        # --- git problems ---
+        - alert: JconfigGitCommitFailing
+          expr: increase(jconfig_git_operations_total{operation="commit",result="failure"}[1h]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "jconfig cannot commit to the repository"
+            description: "Configs are being fetched but not stored."
+
+        - alert: JconfigGitPushFailing
+          expr: jconfig_git_push_enabled == 1 and jconfig_git_push_success == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "jconfig cannot push to the git remote"
+
+        - alert: JconfigGitUnpushedCommits
+          expr: jconfig_git_unpushed_commits > 10
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ "{{ $value }}" }} commits have not reached the git remote"
+            description: >-
+              With an ephemeral volume these commits exist only inside the pod
+              and are lost if it restarts.
+
+        - alert: JconfigRepoDirty
+          expr: jconfig_git_repo_dirty == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "jconfig repository has uncommitted changes"
+
+        # --- the exporter itself ---
+        - alert: JconfigConfigReloadFailed
+          expr: jconfig_config_load_success == 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "jconfig rejected its configuration on reload"
+
+        - alert: JconfigNoRuns
+          expr: time() - jconfig_run_last_timestamp_seconds > 6 * 3600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "jconfig has not completed a backup run in 6 hours"
+        {{- end }}
+{{- end }}
