@@ -87,11 +87,9 @@ defaults:
   insecure_ignore_host_key: false
   formats: [text, set]    # text -> .conf, set -> .set, xml -> .xml
   timeout: 2m
-  # Prefix the stored .conf and .set with the verbatim output of
-  # "show version", "show chassis hardware", "show system license" and
-  # "show virtual-chassis", as # comments. Those four commands need the "view"
-  # permission bit on the login class; without it the file is stored without a
-  # header. The .xml rendering is never prefixed.
+  # Attach the output of "show version", "show chassis hardware",
+  # "show system license" and "show virtual-chassis" to the stored .conf and
+  # .set, as # comments above the configuration.
   header: true
   # Drop lines that change on every fetch and would otherwise produce empty
   # commits. The "Last commit" banner only moves when the device is actually
