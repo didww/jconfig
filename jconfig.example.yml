@@ -87,6 +87,12 @@ defaults:
   insecure_ignore_host_key: false
   formats: [text, set]    # text -> .conf, set -> .set, xml -> .xml
   timeout: 2m
+  # Prefix the stored .conf and .set with hostname, model, Junos release and
+  # the verbatim output of "show chassis hardware" and "show system license",
+  # as # comments. The inventory and licence blocks need the "view" permission
+  # bit on the login class; without it the header is just the first lines. The
+  # .xml rendering is never prefixed.
+  header: true
   # Drop lines that change on every fetch and would otherwise produce empty
   # commits. The "Last commit" banner only moves when the device is actually
   # committed to, so keeping it is usually what you want.

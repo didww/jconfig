@@ -68,8 +68,8 @@ management_listen: "127.0.0.1:{{ .Values.management.port }}"
 management_listen: ""
 {{- end }}
 metrics_path: /metrics
-log_level: {{ .Values.config.logLevel | quote }}
-log_format: {{ .Values.config.logFormat | quote }}
+log_level: {{ .Values.config.log_level | quote }}
+log_format: {{ .Values.config.log_format | quote }}
 
 scheduler:
 {{ toYaml .Values.config.scheduler | indent 2 }}

@@ -72,12 +72,16 @@ Point a config at the printed ports and run a single pass:
 jconfig needs an account that may read the configuration over SSH:
 
 ```
-set system login class config-backup permissions view-configuration
+set system login class config-backup permissions [ view view-configuration ]
 set system login user backup class config-backup
 set system login user backup authentication ssh-ed25519 "ssh-ed25519 AAAA..."
 set system services ssh
 set system services netconf ssh        # only for transport: netconf
 ```
+
+`view-configuration` is what reads the configuration; `view` is what lets the
+account run `show chassis hardware` and `show system license` for the header
+described below. Drop `view` and the backup still works, with a shorter header.
 
 With `view-configuration` alone the stored config has secrets replaced by
 `## SECRET-DATA`, which is usually what you want in a git repository. Add the
@@ -161,6 +165,46 @@ or `file://` needs nothing, and `ssh://` or `git@host:path` requires
 
 Unknown fields are rejected at load time, so a typo like `intrval:` is an error
 rather than a silently ignored setting.
+
+### Inventory header
+
+Every stored `.conf` and `.set` is prefixed with what the device is, what it
+runs, and what hardware and licences it carries, as Junos comments:
+
+```
+# Hostname: srx1.example
+# Model: srx345-dual-ac
+# Junos: 23.4R2-S2.1
+# JUNOS Software Release [23.4R2-S2.1]
+# Hardware inventory:
+# Item             Version  Part number  Serial number     Description
+# Chassis                                XXXXXXXXXXXX      SRX345-DUAL-AC
+# Routing Engine   REV 06   650-077900   XXXXXXXXXXXX      RE-SRX345-DUAL-AC
+# License usage:
+#   Feature name                       used    installed      needed    Expiry
+#   remote-access-ipsec-vpn-client        0            2           0    permanent
+#
+# Licenses installed: none
+## Last commit: 2025-08-14 11:59:21 UTC by admin
+version 23.4R2-S2.1;
+...
+```
+
+The inventory and licence blocks are the verbatim output of
+`show chassis hardware` and `show system license`, so a serial number that
+changes after an RMA shows up as a diff in the same commit as the
+configuration. Both are best effort: a login class without the `view`
+permission bit simply yields a header without them.
+
+The `.xml` rendering is never prefixed — `#` is not a comment there, and the
+file has to stay well-formed.
+
+Turn it off per device or for the whole fleet:
+
+```yaml
+defaults:
+  header: false
+```
 
 ### Repository layout
 

@@ -140,8 +140,8 @@ existingConfigMap: ""
 # values above; everything here is passed through to the daemon verbatim, so it
 # accepts exactly the keys the daemon documents.
 config:
-  logLevel: info
-  logFormat: json
+  log_level: info
+  log_format: json
 
   scheduler:
     interval: 1h

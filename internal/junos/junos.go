@@ -54,6 +54,14 @@ type Result struct {
 	Model    string
 	// OSVersion is the Junos release, e.g. "21.4R3-S4.9".
 	OSVersion string
+	// SoftwareRelease is the release banner as the device words it, e.g.
+	// "JUNOS Software Release [21.4R3-S4.9]".
+	SoftwareRelease string
+	// Inventory and Licenses are the verbatim CLI output of
+	// `show chassis hardware` and `show system license`. Both are empty when
+	// the login class may not run them.
+	Inventory string
+	Licenses  string
 	// LastCommit is when the running config was last committed on the
 	// device, zero if it could not be determined.
 	LastCommit   time.Time
@@ -89,8 +97,73 @@ func Fetch(ctx context.Context, d *config.Device) (*Result, error) {
 	for format, content := range res.Configs {
 		res.Configs[format] = sanitize(content, d.RemoveMatchers())
 	}
+	if d.HeaderEnabled() {
+		res.applyHeader()
+	}
 	res.Duration = time.Since(start)
 	return res, nil
+}
+
+// applyHeader prefixes the stored configuration with the metadata comment
+// block. Only the text and set forms get it: "#" is a comment in both, while
+// prepending it to the XML rendering would produce a malformed document.
+//
+// It runs after sanitize so that remove_lines cannot strip parts of the header
+// out of a device's inventory listing.
+func (r *Result) applyHeader() {
+	head := r.header()
+	if head == "" {
+		return
+	}
+	for _, format := range []string{config.FormatText, config.FormatSet} {
+		if content, ok := r.Configs[format]; ok && content != "" {
+			r.Configs[format] = head + content
+		}
+	}
+}
+
+// header renders what the device is, what it runs, and what hardware and
+// licences it carries, as Junos comments. `show chassis hardware` and
+// `show system license` already label their own output ("Hardware inventory:",
+// "License usage:"), so it is passed through verbatim rather than re-titled.
+func (r *Result) header() string {
+	var b strings.Builder
+	line := func(format string, args ...any) {
+		fmt.Fprintf(&b, format, args...)
+		b.WriteByte('\n')
+	}
+	if r.Hostname != "" {
+		line("# Hostname: %s", r.Hostname)
+	}
+	if r.Model != "" {
+		line("# Model: %s", r.Model)
+	}
+	if r.OSVersion != "" {
+		line("# Junos: %s", r.OSVersion)
+	}
+	if r.SoftwareRelease != "" {
+		line("# %s", r.SoftwareRelease)
+	}
+	b.WriteString(commentBlock(r.Inventory))
+	b.WriteString(commentBlock(r.Licenses))
+	return b.String()
+}
+
+// commentBlock prefixes every line of s with "#". Trailing whitespace is
+// dropped, so a blank line becomes a bare "#" instead of "# " and does not
+// show up as whitespace noise in the repository.
+func commentBlock(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimRight(s, "\n")
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, l := range strings.Split(s, "\n") {
+		b.WriteString(strings.TrimRight("# "+l, " \t"))
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // sanitize normalises line endings, drops lines matching the device's
@@ -149,6 +222,10 @@ type commitInformation struct {
 // "JUNOS Base OS boot [21.4R3-S4.9]" on releases that omit <junos-version>.
 var versionRE = regexp.MustCompile(`\[([^\]]+)\]`)
 
+// releaseRE picks the package comment that carries the release banner, e.g.
+// "JUNOS Software Release [21.4R3-S4.9]", out of the dozens a device lists.
+var releaseRE = regexp.MustCompile(`(?i)software release \[`)
+
 func applyVersion(res *Result, raw []byte) {
 	var si softwareInformation
 	if err := decodeFirst(raw, "software-information", &si); err != nil {
@@ -157,13 +234,15 @@ func applyVersion(res *Result, raw []byte) {
 	res.Hostname = strings.TrimSpace(si.HostName)
 	res.Model = strings.TrimSpace(firstNonEmpty(si.ProductModel, si.ProductName))
 	res.OSVersion = strings.TrimSpace(si.JunosVersion)
-	if res.OSVersion != "" {
-		return
-	}
 	for _, p := range si.Packages {
-		if m := versionRE.FindStringSubmatch(p.Comment); m != nil {
-			res.OSVersion = strings.TrimSpace(m[1])
-			return
+		comment := strings.TrimSpace(p.Comment)
+		if res.SoftwareRelease == "" && releaseRE.MatchString(comment) {
+			res.SoftwareRelease = comment
+		}
+		if res.OSVersion == "" {
+			if m := versionRE.FindStringSubmatch(comment); m != nil {
+				res.OSVersion = strings.TrimSpace(m[1])
+			}
 		}
 	}
 }

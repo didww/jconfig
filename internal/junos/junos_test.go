@@ -325,6 +325,77 @@ func TestFetchInlineKeyInvalid(t *testing.T) {
 	}
 }
 
+func TestFetchHeader(t *testing.T) {
+	for _, transport := range []string{config.TransportSSH, config.TransportNETCONF} {
+		t.Run(transport, func(t *testing.T) {
+			f := junostest.Start(t)
+			d := testDevice(f, transport)
+			d.Formats = []string{config.FormatText, config.FormatSet, config.FormatXML}
+
+			res, err := Fetch(context.Background(), d)
+			if err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+
+			for _, format := range []string{config.FormatText, config.FormatSet} {
+				got := res.Configs[format]
+				for _, want := range []string{
+					"# Hostname: mx1-ams\n",
+					"# Model: mx480\n",
+					"# Junos: 21.4R3-S4.9\n",
+					"# JUNOS Software Release [21.4R3-S4.9]\n",
+					"# Hardware inventory:\n",
+					"# Chassis                                JN123456AB        MX480\n",
+					"# License usage:\n",
+					"# Licenses installed: none\n",
+				} {
+					if !strings.Contains(got, want) {
+						t.Errorf("%s config missing %q:\n%s", format, want, got)
+					}
+				}
+				if !strings.HasPrefix(got, "# Hostname: mx1-ams\n") {
+					t.Errorf("%s config should open with the header:\n%s", format, got)
+				}
+				// The configuration itself must survive underneath it.
+				if !strings.Contains(got, "host-name mx1-ams") {
+					t.Errorf("%s config missing the configuration:\n%s", format, got)
+				}
+				// A blank line inside the device output is commented as a
+				// bare "#", never "# ".
+				for _, l := range strings.Split(got, "\n") {
+					if l != strings.TrimRight(l, " \t") {
+						t.Errorf("%s config has a line with trailing whitespace: %q", format, l)
+					}
+				}
+			}
+
+			// "#" is not a comment in XML, so that rendering is left alone.
+			if got := res.Configs[config.FormatXML]; !strings.HasPrefix(got, "<configuration") {
+				t.Errorf("xml config should not be prefixed with the header:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestFetchHeaderDisabled(t *testing.T) {
+	f := junostest.Start(t)
+	d := testDevice(f, config.TransportSSH)
+	no := false
+	d.Header = &no
+
+	res, err := Fetch(context.Background(), d)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got := res.Configs[config.FormatText]; strings.Contains(got, "# Hostname:") {
+		t.Errorf("header: false should leave the config untouched:\n%s", got)
+	}
+	// The metadata is still collected, it is just not written out.
+	if res.Inventory == "" {
+		t.Error("Inventory should still be populated")
+	}
+}
+
 // wrap breaks s into lines of n characters, the way base64 often arrives.
 func wrap(s string, n int) string {
 	var b strings.Builder

@@ -56,8 +56,32 @@ set system services netconf ssh
 <product-model>mx480</product-model>
 <product-name>mx480</product-name>
 <junos-version>21.4R3-S4.9</junos-version>
+<package-information>
+<name>junos-version</name>
+<comment>JUNOS Software Release [21.4R3-S4.9]</comment>
+</package-information>
 </software-information>
 </rpc-reply>`
+
+	// InventoryText and LicenseText are the CLI output of
+	// `show chassis hardware` and `show system license`. Both label their own
+	// output, exactly as a device does.
+	InventoryText = `Hardware inventory:
+Item             Version  Part number  Serial number     Description
+Chassis                                JN123456AB        MX480
+Routing Engine   REV 06   750-095568   CAAB1234          RE-S-1800x4
+FPC 0                     BUILTIN      BUILTIN           FPC
+  PIC 0                                                  4x10GE SFP+
+`
+
+	LicenseText = `License usage:
+                                 Licensed     Licensed    Licensed
+                                  Feature      Feature     Feature
+  Feature name                       used    installed      needed    Expiry
+  scale-subscriber                      0            8           0    permanent
+
+Licenses installed: none
+`
 
 	commitXML = `<?xml version="1.0" encoding="us-ascii"?>
 <rpc-reply xmlns:junos="http://xml.juniper.net/junos/21.4R0/junos">
@@ -321,6 +345,10 @@ func (f *Server) runCommand(cmd string) (string, uint32) {
 		return versionXML, 0
 	case strings.HasPrefix(cmd, "show system commit"):
 		return commitXML, 0
+	case strings.HasPrefix(cmd, "show chassis hardware"):
+		return InventoryText, 0
+	case strings.HasPrefix(cmd, "show system license"):
+		return LicenseText, 0
 	default:
 		return "error: unknown command: " + cmd + "\n", 0
 	}
@@ -373,6 +401,16 @@ func (f *Server) netconfLoop(ch ssh.Channel) {
 
 		case strings.Contains(msg, "<get-commit-information"):
 			_, _ = io.WriteString(ch, commitXML+"\n]]>]]>\n")
+
+		case strings.Contains(msg, "<command"):
+			out := ""
+			switch {
+			case strings.Contains(msg, "show chassis hardware"):
+				out = InventoryText
+			case strings.Contains(msg, "show system license"):
+				out = LicenseText
+			}
+			_, _ = io.WriteString(ch, wrapReply("<output>"+escape(out)+"</output>"))
 
 		default:
 			_, _ = io.WriteString(ch, wrapReply(

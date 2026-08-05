@@ -140,6 +140,7 @@ type Device struct {
 	Interval              Duration          `yaml:"interval" json:"interval"`
 	Timeout               Duration          `yaml:"timeout" json:"timeout"`
 	Enabled               *bool             `yaml:"enabled" json:"enabled"`
+	Header                *bool             `yaml:"header" json:"-"`
 	RemoveLines           []string          `yaml:"remove_lines" json:"-"`
 	Labels                map[string]string `yaml:"labels" json:"labels,omitempty"`
 
@@ -148,6 +149,10 @@ type Device struct {
 
 // IsEnabled reports whether the device should be backed up.
 func (d *Device) IsEnabled() bool { return d.Enabled == nil || *d.Enabled }
+
+// HeaderEnabled reports whether the stored configuration is prefixed with the
+// inventory and licence comment block. On unless turned off.
+func (d *Device) HeaderEnabled() bool { return d.Header == nil || *d.Header }
 
 // SkipHostKeyCheck reports whether host key verification is disabled.
 func (d *Device) SkipHostKeyCheck() bool {
@@ -288,6 +293,9 @@ func mergeDevice(dst, def *Device) {
 	}
 	if dst.Enabled == nil {
 		dst.Enabled = def.Enabled
+	}
+	if dst.Header == nil {
+		dst.Header = def.Header
 	}
 	if len(dst.HostKeyAlgorithms) == 0 {
 		dst.HostKeyAlgorithms = def.HostKeyAlgorithms

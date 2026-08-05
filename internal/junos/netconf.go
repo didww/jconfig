@@ -185,7 +185,25 @@ func fetchNETCONF(ctx context.Context, d *config.Device) (*Result, error) {
 	if reply, err := sess.rpc(ctx, "<get-commit-information/>"); err == nil {
 		applyCommit(res, reply)
 	}
+	if out, err := sess.commandText(ctx, "show chassis hardware"); err == nil {
+		res.Inventory = out
+	}
+	if out, err := sess.commandText(ctx, "show system license"); err == nil {
+		res.Licenses = out
+	}
 	return res, nil
+}
+
+// commandText runs an operational command and returns its CLI rendering. Junos
+// answers <command format="text"> with the same text the CLI prints, which is
+// what keeps the header identical across the two transports; the dedicated
+// RPCs would return XML that each release structures differently.
+func (s *netconfSession) commandText(ctx context.Context, cmd string) (string, error) {
+	reply, err := s.rpc(ctx, fmt.Sprintf("<command format=\"text\">%s</command>", cmd))
+	if err != nil {
+		return "", err
+	}
+	return elementText(reply, "output")
 }
 
 func netconfConfigRPC(format string) string {

@@ -225,7 +225,24 @@ func fetchSSH(ctx context.Context, d *config.Device) (*Result, error) {
 	if out, err := conn.run(ctx, "show system commit | display xml | no-more"); err == nil {
 		applyCommit(res, out)
 	}
+	if out, err := conn.run(ctx, "show chassis hardware | no-more"); err == nil {
+		res.Inventory = cliText(out)
+	}
+	if out, err := conn.run(ctx, "show system license | no-more"); err == nil {
+		res.Licenses = cliText(out)
+	}
 	return res, nil
+}
+
+// cliText returns operational output, or "" when the device answered with an
+// error banner instead. A class that may read the configuration but not the
+// chassis prints one on stdout with a zero exit status, and it must not end up
+// commented into the repository.
+func cliText(out []byte) string {
+	if err := cliTextError(out); err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 func cliConfigCommand(format string) string {
