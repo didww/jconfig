@@ -60,8 +60,21 @@ set system services netconf ssh
 <name>junos-version</name>
 <comment>JUNOS Software Release [21.4R3-S4.9]</comment>
 </package-information>
+<package-information>
+<name>junos-base</name>
+<comment>JUNOS Base OS boot [21.4R3-S4.9]</comment>
+</package-information>
 </software-information>
 </rpc-reply>`
+
+	// VersionText is the CLI output of `show version`, the rendering the
+	// header is built from. The XML rendering of the same command carries the
+	// values jconfig parses.
+	VersionText = `Hostname: mx1-ams
+Model: mx480
+Junos: 21.4R3-S4.9
+JUNOS Software Release [21.4R3-S4.9]
+`
 
 	// InventoryText and LicenseText are the CLI output of
 	// `show chassis hardware` and `show system license`. Both label their own
@@ -81,6 +94,17 @@ FPC 0                     BUILTIN      BUILTIN           FPC
   scale-subscriber                      0            8           0    permanent
 
 Licenses installed: none
+`
+
+	// VirtualChassisText is the CLI output of `show virtual-chassis`, which
+	// only stacked platforms answer.
+	VirtualChassisText = `Virtual Chassis ID: 0000.0000.0000
+Virtual Chassis Mode: Enabled
+                                           Mstr           Mixed Neighbor List
+Member ID  Status   Serial No    Model     prio  Role      Mode ID  Interface
+0 (FPC 0)  Prsnt    AA0000AA0000 ex2200-48p-4g 128 Master*   NA
+
+Member ID for next new member: 1 (FPC 1)
 `
 
 	commitXML = `<?xml version="1.0" encoding="us-ascii"?>
@@ -341,14 +365,18 @@ func (f *Server) runCommand(cmd string) (string, uint32) {
 </rpc-reply>`, xmlConfig), 0
 	case strings.HasPrefix(cmd, "show configuration"):
 		return f.text(), 0
-	case strings.HasPrefix(cmd, "show version"):
+	case strings.HasPrefix(cmd, "show version") && strings.Contains(cmd, "display xml"):
 		return versionXML, 0
+	case strings.HasPrefix(cmd, "show version"):
+		return VersionText, 0
 	case strings.HasPrefix(cmd, "show system commit"):
 		return commitXML, 0
 	case strings.HasPrefix(cmd, "show chassis hardware"):
 		return InventoryText, 0
 	case strings.HasPrefix(cmd, "show system license"):
 		return LicenseText, 0
+	case strings.HasPrefix(cmd, "show virtual-chassis"):
+		return VirtualChassisText, 0
 	default:
 		return "error: unknown command: " + cmd + "\n", 0
 	}
@@ -405,10 +433,14 @@ func (f *Server) netconfLoop(ch ssh.Channel) {
 		case strings.Contains(msg, "<command"):
 			out := ""
 			switch {
+			case strings.Contains(msg, "show version"):
+				out = VersionText
 			case strings.Contains(msg, "show chassis hardware"):
 				out = InventoryText
 			case strings.Contains(msg, "show system license"):
 				out = LicenseText
+			case strings.Contains(msg, "show virtual-chassis"):
+				out = VirtualChassisText
 			}
 			_, _ = io.WriteString(ch, wrapReply("<output>"+escape(out)+"</output>"))
 

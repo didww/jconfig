@@ -185,11 +185,17 @@ func fetchNETCONF(ctx context.Context, d *config.Device) (*Result, error) {
 	if reply, err := sess.rpc(ctx, "<get-commit-information/>"); err == nil {
 		applyCommit(res, reply)
 	}
+	if out, err := sess.commandText(ctx, "show version"); err == nil {
+		res.Version = out
+	}
 	if out, err := sess.commandText(ctx, "show chassis hardware"); err == nil {
 		res.Inventory = out
 	}
 	if out, err := sess.commandText(ctx, "show system license"); err == nil {
 		res.Licenses = out
+	}
+	if out, err := sess.commandText(ctx, "show virtual-chassis"); err == nil {
+		res.VirtualChassis = out
 	}
 	return res, nil
 }

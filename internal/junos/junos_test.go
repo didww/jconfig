@@ -348,6 +348,8 @@ func TestFetchHeader(t *testing.T) {
 					"# Chassis                                JN123456AB        MX480\n",
 					"# License usage:\n",
 					"# Licenses installed: none\n",
+					"# Virtual Chassis Mode: Enabled\n",
+					"# Member ID for next new member: 1 (FPC 1)\n",
 				} {
 					if !strings.Contains(got, want) {
 						t.Errorf("%s config missing %q:\n%s", format, want, got)
@@ -374,6 +376,31 @@ func TestFetchHeader(t *testing.T) {
 				t.Errorf("xml config should not be prefixed with the header:\n%s", got)
 			}
 		})
+	}
+}
+
+// A standalone box answers `show virtual-chassis` with an error banner. The
+// block has to disappear rather than land in the repository as commented-out
+// error text, and the backup itself must still succeed.
+func TestFetchHeaderUnsupportedCommand(t *testing.T) {
+	f := junostest.Start(t)
+	f.SetFailCommand("show virtual-chassis")
+	d := testDevice(f, config.TransportSSH)
+
+	res, err := Fetch(context.Background(), d)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.VirtualChassis != "" {
+		t.Errorf("VirtualChassis = %q, want empty", res.VirtualChassis)
+	}
+	got := res.Configs[config.FormatText]
+	if strings.Contains(got, "error:") || strings.Contains(got, "Virtual Chassis") {
+		t.Errorf("unsupported command leaked into the header:\n%s", got)
+	}
+	// The blocks the device does answer are still there.
+	if !strings.Contains(got, "# Hardware inventory:\n") {
+		t.Errorf("inventory missing:\n%s", got)
 	}
 }
 

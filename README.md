@@ -190,16 +190,33 @@ version 23.4R2-S2.1;
 ...
 ```
 
-The inventory and licence blocks are the verbatim output of
-`show chassis hardware` and `show system license`, so a serial number that
-changes after an RMA shows up as a diff in the same commit as the
-configuration. Both are best effort: a login class without the `view`
-permission bit simply yields a header without them.
+The header is the CLI output of four commands, commented and concatenated,
+nothing more:
+
+```
+show version
+show chassis hardware
+show system license
+show virtual-chassis
+```
+
+It is stored exactly as the device prints it, so a serial number that changes
+after an RMA, or a stack member that went missing, shows up as a diff in the
+same commit as the configuration — and a release that words its output
+differently is recorded as it words it, rather than reshaped into fields that
+may not fit. On a virtual chassis `show version` prints one block per member,
+so all of them land in the file.
+
+Each block is best effort and independent. A login class without the `view`
+permission bit cannot run these commands at all, so the file is stored without
+a header; a platform that does not implement one of them — a standalone MX has
+no virtual chassis — omits that block. Neither fails the backup.
 
 The `.xml` rendering is never prefixed — `#` is not a comment there, and the
 file has to stay well-formed.
 
-Turn it off per device or for the whole fleet:
+The header costs four extra operational commands per backup. Turn it off per
+device or for the whole fleet:
 
 ```yaml
 defaults:

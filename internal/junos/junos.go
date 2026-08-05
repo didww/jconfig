@@ -54,14 +54,20 @@ type Result struct {
 	Model    string
 	// OSVersion is the Junos release, e.g. "21.4R3-S4.9".
 	OSVersion string
-	// SoftwareRelease is the release banner as the device words it, e.g.
-	// "JUNOS Software Release [21.4R3-S4.9]".
-	SoftwareRelease string
-	// Inventory and Licenses are the verbatim CLI output of
-	// `show chassis hardware` and `show system license`. Both are empty when
-	// the login class may not run them.
-	Inventory string
-	Licenses  string
+	// Version, Inventory, Licenses and VirtualChassis are the verbatim CLI
+	// output of `show version`, `show chassis hardware`,
+	// `show system license` and `show virtual-chassis`, and are what the
+	// header is built from. Each is empty when the login class may not run
+	// the command, or when the platform does not implement it — a standalone
+	// MX has no virtual chassis to report.
+	//
+	// The fields above are parsed from the XML rendering of `show version`
+	// instead, because commit messages and metric labels need them as values
+	// rather than as text.
+	Version        string
+	Inventory      string
+	Licenses       string
+	VirtualChassis string
 	// LastCommit is when the running config was last committed on the
 	// device, zero if it could not be determined.
 	LastCommit   time.Time
@@ -123,29 +129,20 @@ func (r *Result) applyHeader() {
 }
 
 // header renders what the device is, what it runs, and what hardware and
-// licences it carries, as Junos comments. `show chassis hardware` and
-// `show system license` already label their own output ("Hardware inventory:",
-// "License usage:"), so it is passed through verbatim rather than re-titled.
+// licences it carries, as Junos comments.
+//
+// It is the CLI text of four commands, commented and concatenated, with
+// nothing synthesised or re-titled: each command already labels its own output
+// ("Hostname:", "Hardware inventory:", "License usage:"), and passing the text
+// through unparsed is what keeps a header that no release can silently reshape
+// into something misleading — an element the parser does not recognise would
+// go missing, whereas raw text cannot.
 func (r *Result) header() string {
 	var b strings.Builder
-	line := func(format string, args ...any) {
-		fmt.Fprintf(&b, format, args...)
-		b.WriteByte('\n')
-	}
-	if r.Hostname != "" {
-		line("# Hostname: %s", r.Hostname)
-	}
-	if r.Model != "" {
-		line("# Model: %s", r.Model)
-	}
-	if r.OSVersion != "" {
-		line("# Junos: %s", r.OSVersion)
-	}
-	if r.SoftwareRelease != "" {
-		line("# %s", r.SoftwareRelease)
-	}
+	b.WriteString(commentBlock(r.Version))
 	b.WriteString(commentBlock(r.Inventory))
 	b.WriteString(commentBlock(r.Licenses))
+	b.WriteString(commentBlock(r.VirtualChassis))
 	return b.String()
 }
 
@@ -222,10 +219,6 @@ type commitInformation struct {
 // "JUNOS Base OS boot [21.4R3-S4.9]" on releases that omit <junos-version>.
 var versionRE = regexp.MustCompile(`\[([^\]]+)\]`)
 
-// releaseRE picks the package comment that carries the release banner, e.g.
-// "JUNOS Software Release [21.4R3-S4.9]", out of the dozens a device lists.
-var releaseRE = regexp.MustCompile(`(?i)software release \[`)
-
 func applyVersion(res *Result, raw []byte) {
 	var si softwareInformation
 	if err := decodeFirst(raw, "software-information", &si); err != nil {
@@ -234,15 +227,13 @@ func applyVersion(res *Result, raw []byte) {
 	res.Hostname = strings.TrimSpace(si.HostName)
 	res.Model = strings.TrimSpace(firstNonEmpty(si.ProductModel, si.ProductName))
 	res.OSVersion = strings.TrimSpace(si.JunosVersion)
+	if res.OSVersion != "" {
+		return
+	}
 	for _, p := range si.Packages {
-		comment := strings.TrimSpace(p.Comment)
-		if res.SoftwareRelease == "" && releaseRE.MatchString(comment) {
-			res.SoftwareRelease = comment
-		}
-		if res.OSVersion == "" {
-			if m := versionRE.FindStringSubmatch(comment); m != nil {
-				res.OSVersion = strings.TrimSpace(m[1])
-			}
+		if m := versionRE.FindStringSubmatch(p.Comment); m != nil {
+			res.OSVersion = strings.TrimSpace(m[1])
+			return
 		}
 	}
 }

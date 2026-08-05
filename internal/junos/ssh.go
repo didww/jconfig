@@ -225,11 +225,17 @@ func fetchSSH(ctx context.Context, d *config.Device) (*Result, error) {
 	if out, err := conn.run(ctx, "show system commit | display xml | no-more"); err == nil {
 		applyCommit(res, out)
 	}
+	if out, err := conn.run(ctx, "show version | no-more"); err == nil {
+		res.Version = cliText(out)
+	}
 	if out, err := conn.run(ctx, "show chassis hardware | no-more"); err == nil {
 		res.Inventory = cliText(out)
 	}
 	if out, err := conn.run(ctx, "show system license | no-more"); err == nil {
 		res.Licenses = cliText(out)
+	}
+	if out, err := conn.run(ctx, "show virtual-chassis | no-more"); err == nil {
+		res.VirtualChassis = cliText(out)
 	}
 	return res, nil
 }
