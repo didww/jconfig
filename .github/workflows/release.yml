@@ -103,3 +103,60 @@ jobs:
             --version "$version" --app-version "$version"
           helm push "dist/jconfig-$version.tgz" \
             "oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts"
+
+  deb:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build deb packages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for arch in amd64 arm64; do
+            PKG_DIR="jconfig_${VERSION}_${arch}"
+
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -trimpath \
+                -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA}" \
+                -o "jconfig-${arch}" .
+
+            install -d "${PKG_DIR}/DEBIAN"
+            install -d "${PKG_DIR}/usr/bin"
+            install -d "${PKG_DIR}/etc/jconfig"
+            install -d "${PKG_DIR}/lib/systemd/system"
+            install -d "${PKG_DIR}/usr/share/doc/jconfig"
+
+            install -m 0755 "jconfig-${arch}"     "${PKG_DIR}/usr/bin/jconfig"
+            install -m 0644 jconfig.example.yml   "${PKG_DIR}/etc/jconfig/jconfig.yaml.example"
+            install -m 0644 debian/jconfig.service "${PKG_DIR}/lib/systemd/system/jconfig.service"
+            install -m 0644 deploy/alerts.yml     "${PKG_DIR}/usr/share/doc/jconfig/alerts.yml"
+
+            # Maintainer scripts: copy verbatim from debian/ and force 0755.
+            install -m 0755 debian/postinst       "${PKG_DIR}/DEBIAN/postinst"
+            install -m 0755 debian/prerm          "${PKG_DIR}/DEBIAN/prerm"
+            install -m 0755 debian/postrm         "${PKG_DIR}/DEBIAN/postrm"
+
+            # Control file: substitute @VERSION@ and @ARCH@ in the template.
+            sed -e "s/@VERSION@/${VERSION}/" -e "s/@ARCH@/${arch}/" \
+              debian/control.in > "${PKG_DIR}/DEBIAN/control"
+
+            dpkg-deb --build --root-owner-group "${PKG_DIR}"
+          done
+          ls -l jconfig_*.deb
+
+      - name: Attach artifacts to release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: jconfig_*.deb

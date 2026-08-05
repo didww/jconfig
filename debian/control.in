@@ -1,0 +1,15 @@
+Package: jconfig
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: DIDWW <noc@didww.com>
+Section: net
+Priority: optional
+Homepage: https://github.com/didww/jconfig
+Description: Junos configuration backup into git
+ Backs up Junos device configurations into a git repository over SSH or
+ NETCONF, stores what the device has committed, and commits only what
+ actually changed. Ships a Prometheus exporter for answering whether every
+ device is still being backed up and whether every backup reaches git.
+ .
+ The service is installed but not enabled. Write /etc/jconfig/jconfig.yml,
+ starting from /etc/jconfig/jconfig.yaml.example, then enable it.

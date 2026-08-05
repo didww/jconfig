@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # The unit runs as User=jconfig; StateDirectory creates
+        # /var/lib/jconfig at start, so only the account is needed here.
+        if ! getent passwd jconfig >/dev/null; then
+            adduser --system --group --no-create-home \
+                --home /var/lib/jconfig --quiet jconfig
+        fi
+        # Deliberately no enable and no start: jconfig has no usable
+        # configuration until an operator writes one.
+        systemctl daemon-reload || true
+        ;;
+esac

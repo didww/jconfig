@@ -68,7 +68,9 @@ devices that disappeared have their metrics removed, new devices are scheduled,
 and a configuration that fails to load leaves the running one untouched (and
 sets `jconfig_config_load_success` to 0).
 
-A systemd unit is in [`deploy/jconfig.service`](deploy/jconfig.service).
+A systemd unit is in [`debian/jconfig.service`](debian/jconfig.service); the
+`.deb` on the [releases page](https://github.com/didww/jconfig/releases)
+installs it without enabling it.
 
 ## Junos Configuration
 
