@@ -86,9 +86,20 @@ probes:
     periodSeconds: 5
     failureThreshold: 60
 
-# prometheus-operator integration. Both are off by default so the chart works
-# on a cluster without the CRDs installed.
+# prometheus-operator integration. All three are off by default so the chart
+# works on a cluster without the CRDs installed.
 serviceMonitor:
+  enabled: false
+  interval: 60s
+  scrapeTimeout: ""
+  labels: {}
+  relabelings: []
+  metricRelabelings: []
+
+# Scrapes the pod directly instead of going through the Service. Use it where
+# the Prometheus instance selects PodMonitors, or when there is no Service to
+# select. Enabling it alongside serviceMonitor scrapes every metric twice.
+podMonitor:
   enabled: false
   interval: 60s
   scrapeTimeout: ""

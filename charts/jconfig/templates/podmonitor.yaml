@@ -16,7 +16,7 @@ spec:
     # The container port is named metrics; the control surface has no port at
     # all, so there is nothing else here to scrape by accident.
     - port: metrics
-      path: {{ .Values.config.metrics_path | default "/metrics" }}
+      path: /metrics
       interval: {{ .Values.podMonitor.interval }}
       {{- with .Values.podMonitor.scrapeTimeout }}
       scrapeTimeout: {{ . }}

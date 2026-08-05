@@ -347,10 +347,23 @@ config:
 
 `gitPrivateKey` does the same for an SSH git remote, as `${JCONFIG_GIT_SSH_KEY}`.
 
-`serviceMonitor.enabled` and `prometheusRule.enabled` wire up
-prometheus-operator; both are off by default so the chart installs on a
-cluster without those CRDs. The PrometheusRule ships the same alerts as
+`serviceMonitor.enabled`, `podMonitor.enabled` and `prometheusRule.enabled`
+wire up prometheus-operator; all three are off by default so the chart installs
+on a cluster without those CRDs. The PrometheusRule ships the same alerts as
 [`deploy/alerts.yml`](deploy/alerts.yml).
+
+The ServiceMonitor scrapes through the Service, the PodMonitor scrapes the pod
+directly — pick whichever your Prometheus selects, and note that enabling both
+scrapes every metric twice. Each takes `interval`, `scrapeTimeout`, `labels`,
+`relabelings` and `metricRelabelings`; `labels` is where the selector your
+Prometheus expects goes:
+
+```yaml
+podMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+```
 
 The pod is **stateless**. With `repo.clone_on_init: true` (the default whenever
 a push remote is configured), jconfig clones `push.url` into an `emptyDir` at
