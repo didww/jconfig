@@ -1,4 +1,7 @@
 {{- if .Values.serviceMonitor.enabled }}
+{{- if not .Values.service.enabled }}
+{{- fail "serviceMonitor.enabled requires service.enabled, since a ServiceMonitor selects Services. Scrape the pod directly with podMonitor.enabled instead." }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

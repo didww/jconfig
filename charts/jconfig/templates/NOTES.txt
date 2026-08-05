@@ -1,11 +1,19 @@
 jconfig {{ .Chart.AppVersion }} is installed as {{ include "jconfig.fullname" . }}.
 
 Metrics:
+{{- if .Values.service.enabled }}
   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "jconfig.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
   curl localhost:{{ .Values.service.port }}/metrics
 
 Status and probes:
   curl localhost:{{ .Values.service.port }}/ready
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward deploy/{{ include "jconfig.fullname" . }} {{ .Values.metricsPort }}:{{ .Values.metricsPort }}
+  curl localhost:{{ .Values.metricsPort }}/metrics
+
+Status and probes:
+  curl localhost:{{ .Values.metricsPort }}/ready
+{{- end }}
 {{ if .Values.management.enabled }}
 The control surface listens on loopback inside the pod and is not in the
 Service. Reach it with:

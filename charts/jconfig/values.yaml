@@ -57,6 +57,9 @@ management:
   port: 9640
 
 service:
+  # Only the metrics port is served here, so a PodMonitor-scraped install has
+  # no use for it. serviceMonitor.enabled requires it.
+  enabled: true
   type: ClusterIP
   port: 9639
   annotations: {}
