@@ -112,8 +112,22 @@ podMonitor:
 
 prometheusRule:
   enabled: false
+  # Labels on the PrometheusRule object itself, matched by the Prometheus
+  # ruleSelector (kube-prometheus-stack: release: <its release name>).
   labels: {}
-  # Replace to ship your own rules; the defaults live in templates/prometheusrule.yaml.
+  # How each alert carries its text:
+  #   summary  the Prometheus convention, summary plus an optional description
+  #   msg      both folded into a single msg annotation
+  # Applies to the rules below as well.
+  annotationStyle: summary
+  # Static labels added to every alert, and so to every notification routed
+  # from them. A rule that sets the same label keeps its own value.
+  #   alertLabels:
+  #     team: noc
+  #     environment: production
+  alertLabels: {}
+  # Replace to ship your own rules; the defaults live in
+  # templates/prometheusrule.yaml. alertLabels applies to these too.
   rules: []
 
 # Secrets referenced from the configuration as ${VAR}. Prefer existingSecret in
