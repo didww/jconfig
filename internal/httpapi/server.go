@@ -227,7 +227,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	var b strings.Builder
-	b.WriteString("jconfig - Junos configuration backup\n\n")
+	b.WriteString("jconfig - network configuration backup\n\n")
 	fmt.Fprintf(&b, "repository: %s\n", s.run.Config().Repo.Path)
 	fmt.Fprintf(&b, "devices:    %d\n\n", len(states))
 

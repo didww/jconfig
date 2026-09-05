@@ -1,4 +1,4 @@
-# jconfig - Junos configuration backup into git
+# jconfig - Junos and MikroTik RouterOS configuration backup into git
 #
 # Every ${VAR} and ${VAR:-default} is expanded from the environment when this
 # file is read, so secrets never have to live on disk. Write $${VAR} for a
@@ -74,7 +74,11 @@ repo:
 
 # Applied to every device that does not set the field itself.
 defaults:
-  transport: ssh          # ssh (CLI over exec) or netconf
+  # junos (default) or routeros. It picks the driver, and with it which
+  # transports and formats the device below may ask for.
+  vendor: junos
+  transport: ssh          # junos: ssh (CLI over exec) or netconf
+                          # routeros: ssh only
   username: backup
   password: "${JCONFIG_DEVICE_PASSWORD}"
   # key_file: /var/lib/jconfig/.ssh/id_ed25519
@@ -85,11 +89,19 @@ defaults:
   # key_passphrase: "${JCONFIG_SSH_KEY_PASSPHRASE}"
   known_hosts: /var/lib/jconfig/.ssh/known_hosts
   insecure_ignore_host_key: false
-  formats: [text, set]    # text -> .conf, set -> .set, xml -> .xml
+  # junos:    text -> .conf, set -> .set, xml -> .xml      (default: text, set)
+  # routeros: export -> .rsc, verbose -> .verbose.rsc,
+  #           terse -> .terse.rsc                          (default: export)
+  formats: [text, set]
   timeout: 2m
-  # Attach the output of "show version", "show chassis hardware",
-  # "show system license" and "show virtual-chassis" to the stored .conf and
-  # .set, as # comments above the configuration.
+  # Attach what the device reports about itself to the stored configuration,
+  # as # comments above it.
+  #   junos:    "show version", "show chassis hardware", "show system license"
+  #             and "show virtual-chassis", verbatim.
+  #   routeros: the stable fields of "/system resource print",
+  #             "/system routerboard print" and "/system license print".
+  #             Uptime, free memory and CPU load are filtered out: a header
+  #             carrying those would commit every device on every run.
   header: true
   # Drop lines that change on every fetch and would otherwise produce empty
   # commits. The "Last commit" banner only moves when the device is actually
@@ -117,3 +129,25 @@ devices:
     group: access
     formats: [set]
     enabled: true
+
+  - name: gw1.ams
+    vendor: routeros
+    host: 10.0.2.1
+    group: edge
+    # The login needs a group with at least the "read" and "ssh" policies,
+    # plus "sensitive" if show_sensitive is on below. jconfig appends
+    # RouterOS' "+ct" console flags to the user name itself, so configure the
+    # plain account name here.
+    username: backup
+    formats: [export]
+    # Without this RouterOS prints secrets as placeholders and the export
+    # cannot restore the device. With it, PSKs, PPP secrets and SNMP
+    # communities are written into the git repository — so it is off unless
+    # the repository is somewhere that can hold them.
+    show_sensitive: false
+    # The one line that moves on every export, the "# <date> by RouterOS
+    # <version>" banner, is dropped by the driver; the release it names comes
+    # back through the header. Wireless interfaces add live radio state as
+    # comments, which does need a pattern here:
+    # remove_lines:
+    #   - '^# channel: '

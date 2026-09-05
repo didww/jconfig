@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/didww/jconfig/internal/config"
+	"github.com/didww/jconfig/internal/device"
 	"github.com/didww/jconfig/internal/junostest"
 	"golang.org/x/crypto/ssh"
 )
@@ -22,6 +23,7 @@ func testDevice(f *junostest.Server, transport string) *config.Device {
 	yes := true
 	d := &config.Device{
 		Name:       "mx1",
+		Vendor:     config.VendorJunos,
 		Host:       f.Host(),
 		Port:       f.Port(),
 		Transport:  transport,
@@ -107,8 +109,8 @@ func TestFetchBadCredentials(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if stage := StageOf(err); stage != StageAuth {
-		t.Errorf("stage = %q, want %q (err: %v)", stage, StageAuth, err)
+	if stage := device.StageOf(err); stage != device.StageAuth {
+		t.Errorf("stage = %q, want %q (err: %v)", stage, device.StageAuth, err)
 	}
 }
 
@@ -126,8 +128,8 @@ func TestFetchUnknownHostKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected host key verification to fail")
 	}
-	if stage := StageOf(err); stage != StageConnect {
-		t.Errorf("stage = %q, want %q (err: %v)", stage, StageConnect, err)
+	if stage := device.StageOf(err); stage != device.StageConnect {
+		t.Errorf("stage = %q, want %q (err: %v)", stage, device.StageConnect, err)
 	}
 }
 
@@ -152,8 +154,8 @@ func TestFetchCLIErrorOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the CLI error to surface")
 	}
-	if stage := StageOf(err); stage != StageParse {
-		t.Errorf("stage = %q, want %q (err: %v)", stage, StageParse, err)
+	if stage := device.StageOf(err); stage != device.StageParse {
+		t.Errorf("stage = %q, want %q (err: %v)", stage, device.StageParse, err)
 	}
 	if !strings.Contains(err.Error(), "syntax error") {
 		t.Errorf("error should quote the device message, got: %v", err)
@@ -184,8 +186,8 @@ func TestFetchEmptyConfigIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("an empty configuration must not be treated as a successful backup")
 	}
-	if stage := StageOf(err); stage != StageParse {
-		t.Errorf("stage = %q, want %q (err: %v)", stage, StageParse, err)
+	if stage := device.StageOf(err); stage != device.StageParse {
+		t.Errorf("stage = %q, want %q (err: %v)", stage, device.StageParse, err)
 	}
 }
 
@@ -206,17 +208,17 @@ func TestSanitize(t *testing.T) {
 
 	// CRLF is normalised, the matching line is dropped, trailing whitespace
 	// and blank lines collapse to exactly one newline.
-	got := sanitize("## Last commit: now\r\nversion 21.4;   \r\n\r\n", remove)
+	got := device.Sanitize("## Last commit: now\r\nversion 21.4;   \r\n\r\n", remove)
 	want := "version 21.4;\n"
 	if got != want {
-		t.Errorf("sanitize() = %q, want %q", got, want)
+		t.Errorf("device.Sanitize() = %q, want %q", got, want)
 	}
 
-	if got := sanitize("", nil); got != "" {
-		t.Errorf("sanitize(\"\") = %q, want empty", got)
+	if got := device.Sanitize("", nil); got != "" {
+		t.Errorf("device.Sanitize(\"\") = %q, want empty", got)
 	}
-	if got := sanitize("a\nb", nil); got != "a\nb\n" {
-		t.Errorf("sanitize should add exactly one trailing newline, got %q", got)
+	if got := device.Sanitize("a\nb", nil); got != "a\nb\n" {
+		t.Errorf("device.Sanitize should add exactly one trailing newline, got %q", got)
 	}
 }
 
@@ -320,8 +322,8 @@ func TestFetchInlineKeyInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an invalid inline key to fail")
 	}
-	if stage := StageOf(err); stage != StageAuth {
-		t.Errorf("stage = %q, want %q (err: %v)", stage, StageAuth, err)
+	if stage := device.StageOf(err); stage != device.StageAuth {
+		t.Errorf("stage = %q, want %q (err: %v)", stage, device.StageAuth, err)
 	}
 }
 
@@ -391,8 +393,13 @@ func TestFetchHeaderUnsupportedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	if res.VirtualChassis != "" {
-		t.Errorf("VirtualChassis = %q, want empty", res.VirtualChassis)
+	// The block for the command that failed is empty, and the ones around
+	// it keep their positions.
+	if len(res.HeaderBlocks) != len(header) {
+		t.Fatalf("HeaderBlocks = %d, want %d", len(res.HeaderBlocks), len(header))
+	}
+	if got := res.HeaderBlocks[len(header)-1]; got != "" {
+		t.Errorf("virtual-chassis block = %q, want empty", got)
 	}
 	got := res.Configs[config.FormatText]
 	if strings.Contains(got, "error:") || strings.Contains(got, "Virtual Chassis") {
@@ -418,8 +425,8 @@ func TestFetchHeaderDisabled(t *testing.T) {
 		t.Errorf("header: false should leave the config untouched:\n%s", got)
 	}
 	// The metadata is still collected, it is just not written out.
-	if res.Inventory == "" {
-		t.Error("Inventory should still be populated")
+	if res.Header() == "" {
+		t.Error("the header should still be built, just not applied")
 	}
 }
 

@@ -1,22 +1,25 @@
 # jconfig
 
-Junos configuration backup into git, as a single static Go binary.
+Junos and MikroTik RouterOS configuration backup into git, as a single static
+Go binary.
 
 Like [oxidized](https://github.com/ytti/oxidized), but deliberately narrow: it
-backs up **Junos only**, stores what the device has **committed** into **git**,
-and ships a **Prometheus exporter** built for answering two questions —
-*is every device still being backed up?* and *is every backup actually reaching
-git?*
+backs up **two vendors**, stores what the device is **actually running** into
+**git**, and ships a **Prometheus exporter** built for answering two questions
+— *is every device still being backed up?* and *is every backup actually
+reaching git?*
 
 - One binary, no Ruby, no runtime dependencies. Git is spoken natively through
   [go-git](https://github.com/go-git/go-git); the `git` binary is not required.
-- Two transports, selectable per device: **SSH CLI** (`show configuration`) or
-  **NETCONF** (`<get-configuration database="committed">`).
-- Stores the curly-brace config (`.conf`) and the `display set` form (`.set`);
-  `display xml` is available too.
+- **Junos** over **SSH CLI** (`show configuration`) or **NETCONF**
+  (`<get-configuration database="committed">`), stored as the curly-brace
+  config (`.conf`) and the `display set` form (`.set`); `display xml` is
+  available too.
+- **RouterOS** over the **SSH CLI** (`/export`), stored as `.rsc`; the
+  `verbose` and `terse` renderings are available too.
 - Commits only when the configuration actually changed, one commit per device,
-  with the device's model, Junos release and on-box commit metadata in the
-  commit message.
+  with the device's model, software release and — on Junos — on-box commit
+  metadata in the commit message.
 - Optional push to a remote, with push failures and unpushed-commit backlog
   exposed as metrics.
 - Built-in scheduler with per-device intervals, plus an HTTP endpoint to force
@@ -72,7 +75,9 @@ A systemd unit is in [`debian/jconfig.service`](debian/jconfig.service); the
 `.deb` on the [releases page](https://github.com/didww/jconfig/releases)
 installs it without enabling it.
 
-## Junos Configuration
+## Device configuration
+
+Junos:
 
 ```
 set system login class config-backup permissions [ view view-configuration ]
@@ -82,8 +87,31 @@ set system services ssh
 set system services netconf ssh        # only for transport: netconf
 ```
 
+RouterOS:
+
+```
+/user group add name=config-backup policy=ssh,read,test
+/user add name=backup group=config-backup
+/user ssh-keys import public-key-file=backup.pub user=backup
+/ip service enable ssh
+```
+
+Add `sensitive` to the group's policy only if you set `show_sensitive: true`.
+Without it RouterOS prints secrets as placeholders and the export will not
+restore the device; with it, PSKs, PPP secrets and SNMP communities are
+written into the git repository, so it is off by default.
+
+jconfig appends RouterOS' `+ct` console flags to the login name itself — they
+turn off console colours and terminal detection, without which the CLI wraps
+the configuration in escape sequences. Configure the plain account name.
+
+RouterOS opens every export with a `# <date> by RouterOS <version>` banner
+that moves on every fetch; the driver drops that line, and the release it
+names comes back through the header block. Wireless interfaces add live radio
+state as `# channel: ...` comments, which needs a `remove_lines` pattern.
+
 ```sh
-ssh-keyscan -H mx1.ams mx2.ams >> /var/lib/jconfig/.ssh/known_hosts
+ssh-keyscan -H mx1.ams mx2.ams gw1.ams >> /var/lib/jconfig/.ssh/known_hosts
 ```
 
 ## Configure
@@ -112,7 +140,7 @@ secret:
 config:
   repo:
     push:
-      url: https://git.example.net/noc/junos-configs.git
+      url: https://git.example.net/noc/network-configs.git
       username: jconfig
   devices:
     - name: mx1.ams

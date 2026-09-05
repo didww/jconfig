@@ -156,6 +156,52 @@ devices:
 	}
 }
 
+// Each vendor brings its own default transport, port and formats.
+func TestVendorDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := write(t, dir, "jconfig.yml", `
+repo:
+  path: /tmp/repo
+defaults:
+  username: backup
+  password: pw
+  insecure_ignore_host_key: true
+devices:
+  - name: mx1
+    host: 10.0.0.1
+  - name: mx2
+    host: 10.0.0.2
+    transport: netconf
+  - name: gw1
+    host: 10.0.0.3
+    vendor: routeros
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// An inventory that predates RouterOS support stays Junos.
+	mx1 := cfg.Devices[0]
+	if mx1.Vendor != VendorJunos || mx1.Port != 22 {
+		t.Errorf("mx1 = vendor %q port %d, want junos/22", mx1.Vendor, mx1.Port)
+	}
+	if mx2 := cfg.Devices[1]; mx2.Port != 830 {
+		t.Errorf("mx2 port = %d, want 830 for netconf", mx2.Port)
+	}
+
+	gw1 := cfg.Devices[2]
+	if gw1.Transport != TransportSSH || gw1.Port != 22 {
+		t.Errorf("gw1 = transport %q port %d, want ssh/22", gw1.Transport, gw1.Port)
+	}
+	if got := strings.Join(gw1.Formats, ","); got != FormatExport {
+		t.Errorf("gw1 formats = %q, want %q", got, FormatExport)
+	}
+	if got := gw1.Extension(FormatExport); got != ".rsc" {
+		t.Errorf("gw1 export extension = %q, want .rsc", got)
+	}
+}
+
 func TestValidation(t *testing.T) {
 	base := `
 repo:
@@ -192,7 +238,33 @@ devices:
   - name: mx1
     host: 10.0.0.1
     formats: [text, json]
-`, `unknown format "json"`},
+`, `format "json": vendor junos renders`},
+		{"unknown vendor", `
+devices:
+  - name: gw1
+    host: 10.0.0.1
+    vendor: ios
+`, `vendor "ios"`},
+		{"transport the vendor lacks", `
+devices:
+  - name: gw1
+    host: 10.0.0.1
+    vendor: routeros
+    transport: netconf
+`, "vendor routeros supports ssh"},
+		{"junos format on a routeros device", `
+devices:
+  - name: gw1
+    host: 10.0.0.1
+    vendor: routeros
+    formats: [text]
+`, `format "text": vendor routeros renders`},
+		{"show_sensitive on the wrong vendor", `
+devices:
+  - name: mx1
+    host: 10.0.0.1
+    show_sensitive: true
+`, "only meaningful for vendor routeros"},
 		{"bad regex", `
 devices:
   - name: mx1

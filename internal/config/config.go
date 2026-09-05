@@ -23,20 +23,6 @@ const (
 	TransportNETCONF = "netconf"
 )
 
-// Config formats that can be fetched from a device.
-const (
-	FormatText = "text"
-	FormatSet  = "set"
-	FormatXML  = "xml"
-)
-
-// Extensions maps a config format to the file extension used in the repo.
-var Extensions = map[string]string{
-	FormatText: ".conf",
-	FormatSet:  ".set",
-	FormatXML:  ".xml",
-}
-
 // Config is the top-level jconfig configuration.
 type Config struct {
 	// Listen serves metrics, liveness and readiness only. It is safe to
@@ -114,11 +100,14 @@ type Push struct {
 	Force                 bool     `yaml:"force"`
 }
 
-// Device is a single Junos box, and doubles as the defaults block.
+// Device is a single box, and doubles as the defaults block.
 type Device struct {
-	Name      string `yaml:"name" json:"name"`
-	Host      string `yaml:"host" json:"host"`
-	Port      int    `yaml:"port" json:"port"`
+	Name string `yaml:"name" json:"name"`
+	Host string `yaml:"host" json:"host"`
+	Port int    `yaml:"port" json:"port"`
+	// Vendor selects the driver: "junos" or "routeros". Junos when unset,
+	// so inventories written before RouterOS support keep working.
+	Vendor    string `yaml:"vendor" json:"vendor"`
 	Transport string `yaml:"transport" json:"transport"`
 	Username  string `yaml:"username" json:"username"`
 	Password  string `yaml:"password" json:"-"`
@@ -127,22 +116,28 @@ type Device struct {
 	// it with ${VAR} expansion to keep the key in a secret store instead
 	// of on disk; base64 is the safe encoding there, because a raw PEM's
 	// newlines would be substituted into the YAML document.
-	Key                   string            `yaml:"key" json:"-"`
-	KeyPassphrase         string            `yaml:"key_passphrase" json:"-"`
-	KnownHosts            string            `yaml:"known_hosts" json:"-"`
-	InsecureIgnoreHostKey *bool             `yaml:"insecure_ignore_host_key" json:"-"`
-	HostKeyAlgorithms     []string          `yaml:"host_key_algorithms" json:"-"`
-	KexAlgorithms         []string          `yaml:"kex_algorithms" json:"-"`
-	Ciphers               []string          `yaml:"ciphers" json:"-"`
-	MACs                  []string          `yaml:"macs" json:"-"`
-	Group                 string            `yaml:"group" json:"group,omitempty"`
-	Formats               []string          `yaml:"formats" json:"formats"`
-	Interval              Duration          `yaml:"interval" json:"interval"`
-	Timeout               Duration          `yaml:"timeout" json:"timeout"`
-	Enabled               *bool             `yaml:"enabled" json:"enabled"`
-	Header                *bool             `yaml:"header" json:"-"`
-	RemoveLines           []string          `yaml:"remove_lines" json:"-"`
-	Labels                map[string]string `yaml:"labels" json:"labels,omitempty"`
+	Key                   string   `yaml:"key" json:"-"`
+	KeyPassphrase         string   `yaml:"key_passphrase" json:"-"`
+	KnownHosts            string   `yaml:"known_hosts" json:"-"`
+	InsecureIgnoreHostKey *bool    `yaml:"insecure_ignore_host_key" json:"-"`
+	HostKeyAlgorithms     []string `yaml:"host_key_algorithms" json:"-"`
+	KexAlgorithms         []string `yaml:"kex_algorithms" json:"-"`
+	Ciphers               []string `yaml:"ciphers" json:"-"`
+	MACs                  []string `yaml:"macs" json:"-"`
+	Group                 string   `yaml:"group" json:"group,omitempty"`
+	Formats               []string `yaml:"formats" json:"formats"`
+	Interval              Duration `yaml:"interval" json:"interval"`
+	Timeout               Duration `yaml:"timeout" json:"timeout"`
+	Enabled               *bool    `yaml:"enabled" json:"enabled"`
+	Header                *bool    `yaml:"header" json:"-"`
+	// ShowSensitive makes a RouterOS export include secrets — PSKs, PPP
+	// passwords, SNMP communities — instead of the placeholders RouterOS
+	// prints by default. It is what makes the export restorable, and it
+	// writes those secrets into the git repository. Ignored by other
+	// vendors.
+	ShowSensitive *bool             `yaml:"show_sensitive" json:"-"`
+	RemoveLines   []string          `yaml:"remove_lines" json:"-"`
+	Labels        map[string]string `yaml:"labels" json:"labels,omitempty"`
 
 	removeRE []*regexp.Regexp
 }
@@ -153,6 +148,11 @@ func (d *Device) IsEnabled() bool { return d.Enabled == nil || *d.Enabled }
 // HeaderEnabled reports whether the stored configuration is prefixed with the
 // inventory and licence comment block. On unless turned off.
 func (d *Device) HeaderEnabled() bool { return d.Header == nil || *d.Header }
+
+// SensitiveShown reports whether a RouterOS export should include secrets.
+// Off unless turned on: an export that carries PSKs and passwords into git is
+// a deliberate choice, not a default.
+func (d *Device) SensitiveShown() bool { return d.ShowSensitive != nil && *d.ShowSensitive }
 
 // SkipHostKeyCheck reports whether host key verification is disabled.
 func (d *Device) SkipHostKeyCheck() bool {
@@ -250,16 +250,17 @@ func (c *Config) applyBuiltinDefaults() {
 }
 
 func (d *Device) applyBuiltinDefaults(s *Scheduler) {
+	setStr(&d.Vendor, VendorJunos)
 	setStr(&d.Transport, TransportSSH)
-	if d.Port == 0 {
-		if d.Transport == TransportNETCONF {
-			d.Port = 830
-		} else {
-			d.Port = 22
+	// The rest is vendor knowledge; an unknown vendor is caught by
+	// validate, so leave its device untouched rather than guessing.
+	if v, ok := vendors[d.Vendor]; ok {
+		if d.Port == 0 {
+			d.Port = v.defaultPorts[d.Transport]
 		}
-	}
-	if len(d.Formats) == 0 {
-		d.Formats = []string{FormatText, FormatSet}
+		if len(d.Formats) == 0 {
+			d.Formats = v.defaultFormats
+		}
 	}
 	if d.Interval == 0 {
 		d.Interval = s.Interval
@@ -277,6 +278,7 @@ func (d *Device) applyBuiltinDefaults(s *Scheduler) {
 // mergeDevice fills unset fields of dst from def.
 func mergeDevice(dst, def *Device) {
 	setStr(&dst.Host, def.Host)
+	setStr(&dst.Vendor, def.Vendor)
 	setStr(&dst.Transport, def.Transport)
 	setStr(&dst.Username, def.Username)
 	setStr(&dst.Password, def.Password)
@@ -296,6 +298,9 @@ func mergeDevice(dst, def *Device) {
 	}
 	if dst.Header == nil {
 		dst.Header = def.Header
+	}
+	if dst.ShowSensitive == nil {
+		dst.ShowSensitive = def.ShowSensitive
 	}
 	if len(dst.HostKeyAlgorithms) == 0 {
 		dst.HostKeyAlgorithms = def.HostKeyAlgorithms
@@ -383,8 +388,12 @@ func (c *Config) validate() error {
 		if d.Host == "" {
 			errs = append(errs, fmt.Errorf("%s: host is required", who))
 		}
-		if d.Transport != TransportSSH && d.Transport != TransportNETCONF {
-			errs = append(errs, fmt.Errorf("%s: transport %q: must be \"ssh\" or \"netconf\"", who, d.Transport))
+		if !KnownVendor(d.Vendor) {
+			errs = append(errs, fmt.Errorf("%s: vendor %q: want one of %s",
+				who, d.Vendor, strings.Join(Vendors(), ", ")))
+		} else if !supports(Transports(d.Vendor), d.Transport) {
+			errs = append(errs, fmt.Errorf("%s: transport %q: vendor %s supports %s",
+				who, d.Transport, d.Vendor, strings.Join(Transports(d.Vendor), ", ")))
 		}
 		if d.Username == "" {
 			errs = append(errs, fmt.Errorf("%s: username is required", who))
@@ -400,10 +409,16 @@ func (c *Config) validate() error {
 				errs = append(errs, fmt.Errorf("%s: key: %w", who, err))
 			}
 		}
-		for _, f := range d.Formats {
-			if _, ok := Extensions[f]; !ok {
-				errs = append(errs, fmt.Errorf("%s: unknown format %q: want text, set or xml", who, f))
+		if KnownVendor(d.Vendor) {
+			for _, f := range d.Formats {
+				if d.Extension(f) == "" {
+					errs = append(errs, fmt.Errorf("%s: format %q: vendor %s renders %s",
+						who, f, d.Vendor, strings.Join(Formats(d.Vendor), ", ")))
+				}
 			}
+		}
+		if d.SensitiveShown() && d.Vendor != VendorRouterOS {
+			errs = append(errs, fmt.Errorf("%s: show_sensitive is only meaningful for vendor routeros", who))
 		}
 		if !d.SkipHostKeyCheck() {
 			if d.KnownHosts == "" {

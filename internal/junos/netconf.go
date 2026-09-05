@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/didww/jconfig/internal/config"
+	"github.com/didww/jconfig/internal/device"
+	"github.com/didww/jconfig/internal/sshx"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -29,7 +31,7 @@ const clientHello = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 type netconfSession struct {
-	conn  *sshConn
+	conn  *sshx.Conn
 	sess  *ssh.Session
 	stdin io.WriteCloser
 	out   io.Reader
@@ -41,8 +43,8 @@ type netconfSession struct {
 	buf bytes.Buffer
 }
 
-func openNETCONF(ctx context.Context, conn *sshConn) (*netconfSession, error) {
-	sess, err := conn.client.NewSession()
+func openNETCONF(ctx context.Context, conn *sshx.Conn) (*netconfSession, error) {
+	sess, err := conn.Client.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("open session: %w", err)
 	}
@@ -86,7 +88,7 @@ func (s *netconfSession) Close() {
 // read returns the next NETCONF message, stripped of its delimiter. Anything
 // read past the delimiter stays buffered for the following call.
 func (s *netconfSession) read(ctx context.Context) ([]byte, error) {
-	stop := s.conn.watch(ctx)
+	stop := s.conn.Watch(ctx)
 	defer stop()
 
 	searched := 0
@@ -129,9 +131,7 @@ func (s *netconfSession) read(ctx context.Context) ([]byte, error) {
 
 // rpc sends one RPC and returns the reply body.
 func (s *netconfSession) rpc(ctx context.Context, body string) ([]byte, error) {
-	if dl, ok := ctx.Deadline(); ok {
-		_ = s.conn.raw.SetDeadline(dl)
-	}
+	s.conn.SetDeadline(ctx)
 	s.msgID++
 	// No xmlns on <rpc>: this is what Juniper's own examples send, and Junos
 	// resolves the child RPC against its native namespace.
@@ -149,8 +149,8 @@ func (s *netconfSession) rpc(ctx context.Context, body string) ([]byte, error) {
 	return reply, nil
 }
 
-func fetchNETCONF(ctx context.Context, d *config.Device) (*Result, error) {
-	conn, err := dial(ctx, d)
+func fetchNETCONF(ctx context.Context, d *config.Device) (*device.Result, error) {
+	conn, err := sshx.Dial(ctx, d, d.Username)
 	if err != nil {
 		return nil, err
 	}
@@ -158,23 +158,23 @@ func fetchNETCONF(ctx context.Context, d *config.Device) (*Result, error) {
 
 	sess, err := openNETCONF(ctx, conn)
 	if err != nil {
-		return nil, stageErr(StageConnect, err)
+		return nil, device.StageErr(device.StageConnect, err)
 	}
 	defer sess.Close()
 
-	res := &Result{Configs: make(map[string]string, len(d.Formats))}
+	res := &device.Result{Configs: make(map[string]string, len(d.Formats))}
 
 	for _, format := range d.Formats {
 		reply, err := sess.rpc(ctx, netconfConfigRPC(format))
 		if err != nil {
-			return nil, stageErr(StageFetch, fmt.Errorf("get-configuration format=%s: %w", format, err))
+			return nil, device.StageErr(device.StageFetch, fmt.Errorf("get-configuration format=%s: %w", format, err))
 		}
 		content, err := parseNETCONFConfig(format, reply)
 		if err != nil {
-			return nil, stageErr(StageParse, fmt.Errorf("get-configuration format=%s: %w", format, err))
+			return nil, device.StageErr(device.StageParse, fmt.Errorf("get-configuration format=%s: %w", format, err))
 		}
 		if strings.TrimSpace(content) == "" {
-			return nil, stageErr(StageParse, fmt.Errorf("get-configuration format=%s: device returned an empty configuration", format))
+			return nil, device.StageErr(device.StageParse, fmt.Errorf("get-configuration format=%s: device returned an empty configuration", format))
 		}
 		res.Configs[format] = content
 	}
@@ -185,17 +185,12 @@ func fetchNETCONF(ctx context.Context, d *config.Device) (*Result, error) {
 	if reply, err := sess.rpc(ctx, "<get-commit-information/>"); err == nil {
 		applyCommit(res, reply)
 	}
-	if out, err := sess.commandText(ctx, "show version"); err == nil {
-		res.Version = out
-	}
-	if out, err := sess.commandText(ctx, "show chassis hardware"); err == nil {
-		res.Inventory = out
-	}
-	if out, err := sess.commandText(ctx, "show system license"); err == nil {
-		res.Licenses = out
-	}
-	if out, err := sess.commandText(ctx, "show virtual-chassis"); err == nil {
-		res.VirtualChassis = out
+	for _, cmd := range header {
+		out, err := sess.commandText(ctx, cmd)
+		if err != nil {
+			out = ""
+		}
+		res.HeaderBlocks = append(res.HeaderBlocks, out)
 	}
 	return res, nil
 }

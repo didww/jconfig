@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/didww/jconfig/internal/config"
+	"github.com/didww/jconfig/internal/device"
 	"github.com/didww/jconfig/internal/junos"
 	"github.com/didww/jconfig/internal/metrics"
+	"github.com/didww/jconfig/internal/routeros"
 	"github.com/didww/jconfig/internal/store"
 )
 
@@ -23,6 +25,7 @@ type State struct {
 	Name        string          `json:"name"`
 	Host        string          `json:"host"`
 	Group       string          `json:"group,omitempty"`
+	Vendor      string          `json:"vendor"`
 	Transport   string          `json:"transport"`
 	Enabled     bool            `json:"enabled"`
 	Interval    config.Duration `json:"interval"`
@@ -114,6 +117,7 @@ func (r *Runner) Reload(cfg *config.Config) {
 		}
 		st.Host = d.Host
 		st.Group = d.Group
+		st.Vendor = d.Vendor
 		st.Transport = d.Transport
 		st.Enabled = d.IsEnabled()
 		st.Interval = d.Interval
@@ -360,6 +364,18 @@ func (r *Runner) run(ctx context.Context, devs []config.Device) (*RunSummary, er
 	return sum, nil
 }
 
+// fetchDevice dispatches to the driver for the device's vendor. It is the only
+// place the daemon knows which vendors exist; everything downstream works off
+// device.Result.
+func fetchDevice(ctx context.Context, d *config.Device) (*device.Result, error) {
+	switch d.Vendor {
+	case config.VendorRouterOS:
+		return routeros.Fetch(ctx, d)
+	default:
+		return junos.Fetch(ctx, d)
+	}
+}
+
 // backup fetches one device and commits the result.
 func (r *Runner) backup(ctx context.Context, d *config.Device) DeviceResult {
 	start := time.Now()
@@ -374,9 +390,9 @@ func (r *Runner) backup(ctx context.Context, d *config.Device) DeviceResult {
 		st.LastAttempt = &t
 	})
 
-	fetched, err := junos.Fetch(ctx, d)
+	fetched, err := fetchDevice(ctx, d)
 	if err != nil {
-		stage := junos.StageOf(err)
+		stage := device.StageOf(err)
 		res.Stage = stage
 		res.Error = err.Error()
 		res.Duration = time.Since(start)
@@ -448,7 +464,7 @@ func (r *Runner) backup(ctx context.Context, d *config.Device) DeviceResult {
 	r.m.ObserveSuccess(d.Name, now, res.Duration)
 	r.m.DeviceInfo.DeletePartialMatch(map[string]string{"device": d.Name})
 	r.m.DeviceInfo.WithLabelValues(
-		d.Name, d.Host, d.Group, d.Transport, fetched.Model, fetched.OSVersion).Set(1)
+		d.Name, d.Host, d.Group, d.Vendor, d.Transport, fetched.Model, fetched.OSVersion).Set(1)
 	if !fetched.LastCommit.IsZero() {
 		r.m.DeviceLastCommit.WithLabelValues(d.Name).Set(float64(fetched.LastCommit.Unix()))
 	}
@@ -577,7 +593,7 @@ func (r *Runner) failingCount() int {
 
 // repoPath is where a device's config of a given format lives in the repo.
 func repoPath(layout string, d *config.Device, format string) string {
-	name := sanitizeName(d.Name) + config.Extensions[format]
+	name := sanitizeName(d.Name) + d.Extension(format)
 	if layout == "group" {
 		group := sanitizeName(d.Group)
 		if group == "" {
@@ -597,7 +613,7 @@ func sanitizeName(s string) string {
 	return strings.Trim(s, ". ")
 }
 
-func commitMessage(prefix string, d *config.Device, res *junos.Result, files map[string]string) string {
+func commitMessage(prefix string, d *config.Device, res *device.Result, files map[string]string) string {
 	var b strings.Builder
 	b.WriteString(prefix)
 	b.WriteString(d.Name)
@@ -611,8 +627,9 @@ func commitMessage(prefix string, d *config.Device, res *junos.Result, files map
 		fmt.Fprintf(&b, "model:     %s\n", res.Model)
 	}
 	if res.OSVersion != "" {
-		fmt.Fprintf(&b, "junos:     %s\n", res.OSVersion)
+		fmt.Fprintf(&b, "version:   %s\n", res.OSVersion)
 	}
+	fmt.Fprintf(&b, "vendor:    %s\n", d.Vendor)
 	fmt.Fprintf(&b, "transport: %s\n", d.Transport)
 	if !res.LastCommit.IsZero() {
 		by := res.LastCommitBy

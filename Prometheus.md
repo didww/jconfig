@@ -40,7 +40,7 @@ store what we fetched".
 
 | Metric | Meaning |
 | --- | --- |
-| `jconfig_device_info{device,host,group,transport,model,os_version}` | inventory and what the device reports |
+| `jconfig_device_info{device,host,group,vendor,transport,model,os_version}` | inventory and what the device reports |
 | `jconfig_device_last_commit_timestamp_seconds{device}` | when the config was last committed **on the device** |
 | `jconfig_device_last_commit_by{device,user}` | who committed it |
 | `jconfig_config_changed_total{device}` | times the stored config changed |

@@ -13,6 +13,7 @@ import (
 	"github.com/didww/jconfig/internal/config"
 	"github.com/didww/jconfig/internal/junostest"
 	"github.com/didww/jconfig/internal/metrics"
+	"github.com/didww/jconfig/internal/rostest"
 	"github.com/didww/jconfig/internal/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -309,7 +310,7 @@ func TestReloadForgetsRemovedDevices(t *testing.T) {
 }
 
 func TestRepoPath(t *testing.T) {
-	d := &config.Device{Name: "mx1", Group: "core"}
+	d := &config.Device{Name: "mx1", Group: "core", Vendor: config.VendorJunos}
 
 	if got := repoPath("flat", d, config.FormatText); got != "mx1.conf" {
 		t.Errorf("flat text path = %q", got)
@@ -321,6 +322,15 @@ func TestRepoPath(t *testing.T) {
 	d.Group = ""
 	if got := repoPath("group", d, config.FormatXML); got != "ungrouped/mx1.xml" {
 		t.Errorf("ungrouped path = %q", got)
+	}
+
+	// The extension is the vendor's, not the format name's.
+	ros := &config.Device{Name: "gw1", Vendor: config.VendorRouterOS}
+	if got := repoPath("flat", ros, config.FormatExport); got != "gw1.rsc" {
+		t.Errorf("flat routeros path = %q", got)
+	}
+	if got := repoPath("flat", ros, config.FormatTerse); got != "gw1.terse.rsc" {
+		t.Errorf("flat routeros terse path = %q", got)
 	}
 }
 
@@ -371,5 +381,105 @@ func TestCountLines(t *testing.T) {
 		if got := countLines(in); got != want {
 			t.Errorf("countLines(%q) = %d, want %d", in, got, want)
 		}
+	}
+}
+
+// A mixed inventory has to reach the repository under each vendor's own file
+// names, with the vendor's own transport and formats.
+func TestMixedVendorRun(t *testing.T) {
+	jun := junostest.Start(t)
+	ros := rostest.Start(t)
+
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "configs")
+	cfgPath := filepath.Join(dir, "jconfig.yml")
+
+	cfgYAML := fmt.Sprintf(`
+repo:
+  path: %s
+  layout: flat
+scheduler:
+  interval: 1h
+  concurrency: 4
+defaults:
+  insecure_ignore_host_key: true
+devices:
+  - name: mx1
+    host: %s
+    port: %d
+    username: %s
+    password: %s
+    remove_lines:
+      - '^## Last commit:'
+  - name: gw1
+    vendor: routeros
+    host: %s
+    port: %d
+    username: %s
+    password: %s
+    formats: [export, terse]
+`, repo,
+		jun.Host(), jun.Port(), junostest.User, junostest.Pass,
+		ros.Host(), ros.Port(), rostest.User, rostest.Pass)
+
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	m := metrics.New()
+	st, err := store.Open(context.Background(), cfg.Repo)
+	if err != nil {
+		t.Fatalf("open repo: %v", err)
+	}
+	r := New(cfg, st, m, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	sum, err := r.RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("RunAll: %v", err)
+	}
+	if sum.Total != 2 || sum.Succeeded != 2 {
+		t.Fatalf("summary = %+v, want 2 successes", sum)
+	}
+
+	// Junos keeps .conf/.set, RouterOS gets .rsc/.terse.rsc.
+	for _, name := range []string{"mx1.conf", "mx1.set", "gw1.rsc", "gw1.terse.rsc"} {
+		if _, err := os.Stat(filepath.Join(repo, name)); err != nil {
+			t.Errorf("expected %s in the repo: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repo, "gw1.conf")); err == nil {
+		t.Error("the RouterOS device should not be stored under the Junos extension")
+	}
+
+	body, err := os.ReadFile(filepath.Join(repo, "gw1.rsc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "set name=gw1-ams") {
+		t.Errorf("gw1.rsc is missing the export:\n%s", body)
+	}
+
+	// A second run of unchanged devices must not commit again — the check
+	// that catches a volatile line surviving into the stored config.
+	sum, err = r.RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("second RunAll: %v", err)
+	}
+	if sum.Changed != 0 {
+		t.Errorf("Changed = %d on an unchanged fleet, want 0", sum.Changed)
+	}
+
+	var vendor string
+	for _, s := range r.States() {
+		if s.Name == "gw1" {
+			vendor = s.Vendor
+		}
+	}
+	if vendor != config.VendorRouterOS {
+		t.Errorf("gw1 vendor = %q, want routeros", vendor)
 	}
 }

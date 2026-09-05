@@ -97,7 +97,7 @@ func New() *Metrics {
 
 		DeviceInfo: gauge("device_info",
 			"Device metadata as reported by the device, always 1.",
-			"device", "host", "group", "transport", "model", "os_version"),
+			"device", "host", "group", "vendor", "transport", "model", "os_version"),
 
 		BackupSuccess: gauge("backup_success",
 			"Whether the last backup attempt for this device succeeded.", "device"),
